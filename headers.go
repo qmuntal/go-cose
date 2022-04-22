@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/fxamacker/cbor/v2"
+	ccbor "github.com/qmuntal/cbor"
 )
 
 // COSE Header labels registered in the IANA "COSE Header Parameters" registry.
@@ -24,31 +25,93 @@ const (
 	HeaderLabelX5U               int64 = 35
 )
 
+func encodeBasicType(b *ccbor.Builder, v interface{}) bool {
+	switch v := v.(type) {
+	case string:
+		b.AddString(v)
+	case int:
+		b.AddInt(v)
+	case int8:
+		b.AddInt8(v)
+	case int16:
+		b.AddInt16(v)
+	case int32:
+		b.AddInt32(v)
+	case int64:
+		b.AddInt64(v)
+	case uint:
+		b.AddUint(v)
+	case uint8:
+		b.AddUint8(v)
+	case uint16:
+		b.AddUint16(v)
+	case uint32:
+		b.AddUint32(v)
+	case uint64:
+		b.AddUint64(v)
+	case Algorithm:
+		b.AddInt64(int64(v))
+	default:
+		return false
+	}
+	return true
+}
+
+func encodeMapValue(b *ccbor.Builder, v interface{}) {
+	if encodeBasicType(b, v) {
+		return
+	}
+	switch v := v.(type) {
+	case []interface{}:
+		b.AddArray(uint(len(v)), func(b *ccbor.Builder) {
+			for _, item := range v {
+				encodeMapValue(b, item)
+			}
+		})
+	default:
+		b.SetError(errors.New("cbor: unsupported type"))
+	}
+}
+
 // ProtectedHeader contains parameters that are to be cryptographically
 // protected.
 type ProtectedHeader map[interface{}]interface{}
+
+func (h ProtectedHeader) MarshalCBOR2(b *ccbor.Builder) {
+	if len(h) == 0 {
+		b.AddBytes([]byte{})
+	} else {
+		err := validateHeaderLabel(h)
+		if err != nil {
+			b.SetError(err)
+			return
+		}
+		if err = h.ensureCritical(); err != nil {
+			b.SetError(err)
+			return
+		}
+		b.AddBytesUnknownLength(func(b *ccbor.Builder) {
+			b.AddMap(len(h))
+			for k, v := range h {
+				b.AddMapItem(func(b *ccbor.Builder) {
+					if !encodeBasicType(b, k) {
+						b.SetError(errors.New("cbor: unsupported type"))
+					}
+				}, func(b *ccbor.Builder) {
+					encodeMapValue(b, v)
+				})
+			}
+		})
+	}
+}
 
 // MarshalCBOR encodes the protected header into a CBOR bstr object.
 // A zero-length header is encoded as a zero-length string rather than as a
 // zero-length map (encoded as h'a0').
 func (h ProtectedHeader) MarshalCBOR() ([]byte, error) {
-	var encoded []byte
-	if len(h) == 0 {
-		encoded = []byte{}
-	} else {
-		err := validateHeaderLabel(h)
-		if err != nil {
-			return nil, err
-		}
-		if err = h.ensureCritical(); err != nil {
-			return nil, err
-		}
-		encoded, err = encMode.Marshal(map[interface{}]interface{}(h))
-		if err != nil {
-			return nil, err
-		}
-	}
-	return encMode.Marshal(encoded)
+	var b ccbor.Builder
+	h.MarshalCBOR2(&b)
+	return b.Bytes()
 }
 
 // UnmarshalCBOR decodes a CBOR bstr object into ProtectedHeader.
@@ -163,14 +226,33 @@ type UnprotectedHeader map[interface{}]interface{}
 
 // MarshalCBOR encodes the unprotected header into a CBOR map object.
 // A zero-length header is encoded as a zero-length map (encoded as h'a0').
-func (h UnprotectedHeader) MarshalCBOR() ([]byte, error) {
+func (h UnprotectedHeader) MarshalCBOR2(b *ccbor.Builder) {
 	if len(h) == 0 {
-		return []byte{0xa0}, nil
+		b.AddMap(0)
+		return
 	}
 	if err := validateHeaderLabel(h); err != nil {
-		return nil, err
+		b.SetError(err)
+		return
 	}
-	return encMode.Marshal(map[interface{}]interface{}(h))
+	b.AddMap(len(h))
+	for k, v := range h {
+		b.AddMapItem(func(b *ccbor.Builder) {
+			if !encodeBasicType(b, k) {
+				b.SetError(errors.New("cbor: unsupported type"))
+			}
+		}, func(b *ccbor.Builder) {
+			encodeMapValue(b, v)
+		})
+	}
+}
+
+// MarshalCBOR encodes the unprotected header into a CBOR map object.
+// A zero-length header is encoded as a zero-length map (encoded as h'a0').
+func (h UnprotectedHeader) MarshalCBOR() ([]byte, error) {
+	var b ccbor.Builder
+	h.MarshalCBOR2(&b)
+	return b.Bytes()
 }
 
 // UnmarshalCBOR decodes a CBOR map object into UnprotectedHeader.
@@ -262,6 +344,16 @@ func (h *Headers) MarshalProtected() ([]byte, error) {
 	return encMode.Marshal(h.Protected)
 }
 
+// MarshalProtected encodes the protected header.
+// RawProtected is returned if it is not set to nil.
+func (h *Headers) MarshalProtected2(b *ccbor.Builder) {
+	if len(h.RawProtected) > 0 {
+		b.AddRawBytes(h.RawProtected)
+	} else {
+		h.Protected.MarshalCBOR2(b)
+	}
+}
+
 // MarshalUnprotected encodes the unprotected header.
 // RawUnprotected is returned if it is not set to nil.
 func (h *Headers) MarshalUnprotected() ([]byte, error) {
@@ -269,6 +361,14 @@ func (h *Headers) MarshalUnprotected() ([]byte, error) {
 		return h.RawUnprotected, nil
 	}
 	return encMode.Marshal(h.Unprotected)
+}
+
+func (h *Headers) MarshalUnprotected2(b *ccbor.Builder) {
+	if len(h.RawUnprotected) > 0 {
+		b.AddRawBytes(h.RawUnprotected)
+	} else {
+		h.Unprotected.MarshalCBOR2(b)
+	}
 }
 
 // UnmarshalFromRaw decodes Protected from RawProtected and Unprotected from
@@ -337,38 +437,52 @@ func (h *Headers) ensureVerificationAlgorithm(alg Algorithm, external []byte) er
 //
 // Reference: https://datatracker.ietf.org/doc/html/rfc8152#section-1.4
 func validateHeaderLabel(h map[interface{}]interface{}) error {
-	existing := make(map[interface{}]struct{})
+	existingInt := make(map[int64]struct{}, len(h))
+	var existingString map[string]struct{}
 	for label := range h {
+		var k int64
+		var isString bool
 		switch v := label.(type) {
 		case int:
-			label = int64(v)
+			k = int64(v)
 		case int8:
-			label = int64(v)
+			k = int64(v)
 		case int16:
-			label = int64(v)
+			k = int64(v)
 		case int32:
-			label = int64(v)
+			k = int64(v)
 		case int64:
-			label = int64(v)
+			k = int64(v)
 		case uint:
-			label = int64(v)
+			k = int64(v)
 		case uint8:
-			label = int64(v)
+			k = int64(v)
 		case uint16:
-			label = int64(v)
+			k = int64(v)
 		case uint32:
-			label = int64(v)
+			k = int64(v)
 		case uint64:
-			label = int64(v)
+			k = int64(v)
 		case string:
+			if existingString == nil {
+				existingString = make(map[string]struct{})
+			}
+			isString = true
+			if _, ok := existingString[v]; ok {
+				return fmt.Errorf("cbor: header label: duplicated label: %v", v)
+			} else {
+				existingString[v] = struct{}{}
+			}
 			// no conversion
 		default:
 			return errors.New("cbor: header label: require int / tstr type")
 		}
-		if _, ok := existing[label]; ok {
-			return fmt.Errorf("cbor: header label: duplicated label: %v", label)
-		} else {
-			existing[label] = struct{}{}
+		if !isString {
+			if _, ok := existingInt[k]; ok {
+				return fmt.Errorf("cbor: header label: duplicated label: %v", label)
+			} else {
+				existingInt[k] = struct{}{}
+			}
 		}
 	}
 	return nil

@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/fxamacker/cbor/v2"
+	ccbor "github.com/qmuntal/cbor"
 )
 
 // sign1Message represents a COSE_Sign1 CBOR object:
@@ -58,24 +59,15 @@ func (m *Sign1Message) MarshalCBOR() ([]byte, error) {
 	if len(m.Signature) == 0 {
 		return nil, ErrEmptySignature
 	}
-	protected, err := m.Headers.MarshalProtected()
-	if err != nil {
-		return nil, err
-	}
-	unprotected, err := m.Headers.MarshalUnprotected()
-	if err != nil {
-		return nil, err
-	}
-	content := sign1Message{
-		Protected:   protected,
-		Unprotected: unprotected,
-		Payload:     m.Payload,
-		Signature:   m.Signature,
-	}
-	return encMode.Marshal(cbor.Tag{
-		Number:  CBORTagSign1Message,
-		Content: content,
+	b := ccbor.NewBuilder(make([]byte, 0, 20+len(m.Payload)+len(m.Signature)))
+	b.AddTag(CBORTagSign1Message)
+	b.AddArray(4, func(b *ccbor.Builder) {
+		m.Headers.MarshalProtected2(b)
+		m.Headers.MarshalUnprotected2(b)
+		b.AddBytes(m.Payload)
+		b.AddBytes(m.Signature)
 	})
+	return b.Bytes()
 }
 
 // UnmarshalCBOR decodes a COSE_Sign1_Tagged object into Sign1Message.
