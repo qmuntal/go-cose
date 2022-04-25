@@ -371,7 +371,7 @@ func (h *Headers) ensureVerificationAlgorithm(alg Algorithm, external []byte) er
 //
 // Reference: https://datatracker.ietf.org/doc/html/rfc8152#section-1.4
 func validateHeaderLabel(h map[interface{}]interface{}) error {
-	existingInt := make(map[interface{}]struct{})
+	existing := make(map[interface{}]struct{})
 	for label := range h {
 		switch v := label.(type) {
 		case int:
@@ -399,10 +399,10 @@ func validateHeaderLabel(h map[interface{}]interface{}) error {
 		default:
 			return errors.New("cbor: header label: require int / tstr type")
 		}
-		if _, ok := existingInt[label]; ok {
+		if _, ok := existing[label]; ok {
 			return fmt.Errorf("cbor: header label: duplicated label: %v", label)
 		} else {
-			existingInt[label] = struct{}{}
+			existing[label] = struct{}{}
 		}
 	}
 	return nil
