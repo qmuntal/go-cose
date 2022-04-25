@@ -29,7 +29,7 @@ const (
 // protected.
 type ProtectedHeader map[interface{}]interface{}
 
-func (h ProtectedHeader) MarshalCBOR2(b *ccbor.Builder) {
+func (h ProtectedHeader) MarshalCBORValue(b *ccbor.Builder) {
 	if len(h) == 0 {
 		b.AddBytes([]byte{})
 	} else {
@@ -53,7 +53,7 @@ func (h ProtectedHeader) MarshalCBOR2(b *ccbor.Builder) {
 // zero-length map (encoded as h'a0').
 func (h ProtectedHeader) MarshalCBOR() ([]byte, error) {
 	var b ccbor.Builder
-	h.MarshalCBOR2(&b)
+	h.MarshalCBORValue(&b)
 	return b.Bytes()
 }
 
@@ -169,7 +169,7 @@ type UnprotectedHeader map[interface{}]interface{}
 
 // MarshalCBOR encodes the unprotected header into a CBOR map object.
 // A zero-length header is encoded as a zero-length map (encoded as h'a0').
-func (h UnprotectedHeader) MarshalCBOR2(b *ccbor.Builder) {
+func (h UnprotectedHeader) MarshalCBORValue(b *ccbor.Builder) {
 	if len(h) == 0 {
 		b.AddMap(0)
 		return
@@ -185,7 +185,7 @@ func (h UnprotectedHeader) MarshalCBOR2(b *ccbor.Builder) {
 // A zero-length header is encoded as a zero-length map (encoded as h'a0').
 func (h UnprotectedHeader) MarshalCBOR() ([]byte, error) {
 	var b ccbor.Builder
-	h.MarshalCBOR2(&b)
+	h.MarshalCBORValue(&b)
 	return b.Bytes()
 }
 
@@ -284,7 +284,7 @@ func (h *Headers) MarshalProtected2(b *ccbor.Builder) {
 	if len(h.RawProtected) > 0 {
 		b.AddRawBytes(h.RawProtected)
 	} else {
-		h.Protected.MarshalCBOR2(b)
+		h.Protected.MarshalCBORValue(b)
 	}
 }
 
@@ -301,7 +301,7 @@ func (h *Headers) MarshalUnprotected2(b *ccbor.Builder) {
 	if len(h.RawUnprotected) > 0 {
 		b.AddRawBytes(h.RawUnprotected)
 	} else {
-		h.Unprotected.MarshalCBOR2(b)
+		h.Unprotected.MarshalCBORValue(b)
 	}
 }
 
